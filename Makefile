@@ -165,7 +165,7 @@ ifeq ($(ios_target), )
 	@echo "Try running make build-ios TARGET where TARGET is one of dev, beta or release"
 	@exit 1
 endif
-ifneq ($(ios_target), $(filter $(ios_target),dev beta release))
+ifneq ($(ios_target), $(filter $(ios_target),dev beta release qa_build))
 	@echo Invalid target set to build iOS app
 	@echo "Try running make build-ios TARGET where TARGET is one of dev, beta or release"
 	@exit 1
@@ -184,7 +184,7 @@ ifeq ($(android_target), )
 	@echo "Try running make build-android TARGET where TARGET is one of dev, beta or release"
 	@exit 1
 endif
-ifneq ($(android_target), $(filter $(android_target),dev alpha release))
+ifneq ($(android_target), $(filter $(android_target),dev alpha release qa_build))
 	@echo Invalid target set to build Android app
 	@echo "Try running make build-android TARGET where TARGET is one of dev, beta or release"
 	@exit 1
@@ -229,6 +229,9 @@ beta:
 	@:
 
 release:
+	@:
+
+qa_build:
 	@:
 
 ## Help documentatin à la https://marmelab.com/blog/2016/02/29/auto-documented-makefile.html

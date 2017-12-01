@@ -1,3 +1,6 @@
+require 'aws-sdk-s3'
+require 'erb'
+
 fastlane_version '2.56.0'
 skip_docs
 
@@ -168,6 +171,40 @@ platform :ios do
     )
 
     sh 'cp -R ../assets/release/icons/ios/* ../ios/Mattermost/Images.xcassets/AppIcon.appiconset/'
+  end
+
+  lane :qa_build do
+    ipa_path = '../Mattermost.ipa'
+    File.delete(ipa_path) if File.file?(ipa_path)
+
+    match(type: 'adhoc', app_identifier: 'com.mattermost.rnbeta')
+    build_ios({
+      release: true,
+      increment_build: false,
+      ensure_git_status_clean: true,
+      method: 'ad-hoc'
+    })
+
+    plist_template = File.read('plist.erb')
+    abbreviated_commit_hash = `git rev-parse --short head`
+    abbreviated_commit_hash.strip!
+    # TODO: See if we can use abbreviated_commit_hash as bundle-version in the plist file
+    plist_body = ERB.new(plist_template).result(binding)
+
+    s3 = Aws::S3::Resource.new(region: ENV['AWS_REGION'])
+    plist_obj = s3.bucket(ENV['AWS_BUCKET_NAME']).object("ios/#{abbreviated_commit_hash}.plist")
+    plist_obj.put(body: plist_body)
+
+    ipa_obj = s3.bucket(ENV['AWS_BUCKET_NAME']).object("ios/#{abbreviated_commit_hash}.ipa")
+    ipa_obj.upload_file(ipa_path)
+
+    # TODO: Upload beta logo if not present
+
+    ios_install_url = "itms-services://?action=download-manifest&url=https://s3.#{ENV['AWS_REGION']}.amazonaws.com/#{ENV['AWS_BUCKET_NAME']}/ios/#{abbreviated_commit_hash}.plist"
+
+    if ENV['MATTERMOST_WEBHOOK_URL']
+      `curl -i -X POST -H 'Content-Type: application/json' -d '{"text": "QA build [#{abbreviated_commit_hash}](https://github.com/mattermost/mattermost-mobile/commit/#{abbreviated_commit_hash}) — iOS: #{ios_install_url}"}' #{ENV['MATTERMOST_WEBHOOK_URL']}`
+    end
   end
 
   error do |lane, exception|
@@ -361,6 +398,30 @@ platform :android do
     )
   end
 
+  lane :qa_build do
+
+    prepare_release()
+
+    build_android({
+      release: true,
+      increment_build: false,
+      ensure_git_status_clean: false # FIXME: Only false for development.
+    })
+
+    abbreviated_commit_hash = last_git_commit[:abbreviated_commit_hash]
+
+    s3 = Aws::S3::Resource.new(region: ENV['AWS_REGION'])
+
+    apk_obj = s3.bucket(ENV['AWS_BUCKET_NAME']).object("android/#{abbreviated_commit_hash}.apk")
+    apk_obj.upload_file("#{lane_context[SharedValues::GRADLE_APK_OUTPUT_PATH]}")
+
+    android_install_path = "https://s3.#{ENV['AWS_REGION']}.amazonaws.com/#{ENV['AWS_BUCKET_NAME']}/android/#{abbreviated_commit_hash}.apk"
+
+    if ENV['MATTERMOST_WEBHOOK_URL']
+      `curl -i -X POST -H 'Content-Type: application/json' -d '{"text": "QA build [#{abbreviated_commit_hash}](https://github.com/mattermost/mattermost-mobile/commit/#{abbreviated_commit_hash}) — Android: #{android_install_path}"}' #{ENV['MATTERMOST_WEBHOOK_URL']}`
+    end
+  end
+
   error do |lane, exception|
     if ENV['MATTERMOST_WEBHOOK_URL']
       send_message_for_android('', 'Unsuccessful Build', exception.message, [:lane], false)
@@ -375,7 +436,7 @@ platform :android do
     beta_dir = '../android/app/src/main/java/com/mattermost/rnbeta/'
     release_dir = '../android/app/src/main/java/com/mattermost/rn/'
 
-    sh "mv #{beta_dir} #{release_dir}"
+    sh "mv #{beta_dir} #{release_dir}" if Dir.exists?(beta_dir)
     sh 'cp -R ../assets/release/icons/android/* ../android/app/src/main/res/'
 
     find_replace_string(
